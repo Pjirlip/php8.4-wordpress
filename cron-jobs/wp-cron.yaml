@@ -1,0 +1,49 @@
+# WordPress-Cron als Kubernetes CronJob (ersetzt wp-cron.php im Request-Pfad und den cron-Daemon im Container, H2).
+# Voraussetzung im Web-Deployment: DISABLE_WP_CRON=true und in wp-config.php
+#   define('DISABLE_WP_CRON', filter_var(getenv('DISABLE_WP_CRON') ?: 'false', FILTER_VALIDATE_BOOLEAN));
+# Läuft mit demselben Image (enthält /bin/wp-cli) und derselben Webroot-PVC wie das Web-Deployment.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: example-site-wp-cron
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000      # propeller; wp-cli verweigert root ohne --allow-root
+            runAsGroup: 1000
+          containers:
+            - name: wp-cron
+              image: ghcr.io/pjirlip/php8.4-wordpress:latest
+              command: ["wp-cli", "cron", "event", "run", "--due-now", "--quiet", "--path=/var/www/html"]
+              envFrom:
+                - secretRef:
+                    name: example-site-env       # DB-Zugang, SMTP_* usw. wie im Web-Deployment
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  memory: 512Mi
+              volumeMounts:
+                - name: webroot
+                  mountPath: /var/www/html
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: webroot
+              persistentVolumeClaim:
+                claimName: example-site-webroot
+            - name: tmp
+              emptyDir: {}

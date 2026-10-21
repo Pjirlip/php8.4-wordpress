@@ -1,0 +1,51 @@
+image: docker:latest
+
+stages:
+  - build
+  - dev
+  - staging
+  - production
+
+variables:
+  DOCKER_DRIVER: overlay2
+  CONTAINER_BUILD_IMAGE: $CI_REGISTRY_IMAGE:build
+  CONTAINER_DEV_IMAGE: $CI_REGISTRY_IMAGE:dev
+  CONTAINER_STAGING_IMAGE: $CI_REGISTRY_IMAGE:staging
+  CONTAINER_PRODUCTION_IMAGE: $CI_REGISTRY_IMAGE:production
+
+before_script:
+  - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY_IMAGE
+
+build:
+  stage: build
+  script:
+    - docker pull $CONTAINER_BUILD_IMAGE || true
+    - docker build --cache-from $CONTAINER_BUILD_IMAGE --build-arg BUILDKIT_INLINE_CACHE=1 -t $CONTAINER_BUILD_IMAGE .
+    - docker push $CONTAINER_BUILD_IMAGE
+  allow_failure: false
+
+dev-image:
+  stage: dev
+  script:
+    - docker pull $CONTAINER_BUILD_IMAGE
+    - docker tag $CONTAINER_BUILD_IMAGE $CONTAINER_DEV_IMAGE
+    - docker push $CONTAINER_DEV_IMAGE
+
+staging-image:
+  stage: staging
+  script:
+    - docker pull $CONTAINER_BUILD_IMAGE
+    - docker tag $CONTAINER_BUILD_IMAGE $CONTAINER_STAGING_IMAGE
+    - docker push $CONTAINER_STAGING_IMAGE
+  only:
+    - master
+    
+pruduction:
+    stage: production
+    script: 
+        - docker pull $CONTAINER_BUILD_IMAGE
+        - docker tag $CONTAINER_BUILD_IMAGE $CONTAINER_PRODUCTION_IMAGE
+        - docker push $CONTAINER_PRODUCTION_IMAGE
+    only:
+        - master
+    when: manual

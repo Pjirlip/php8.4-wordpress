@@ -1,0 +1,7 @@
+.git
+.github
+.gitlab-ci.yml
+test
+cron-jobs
+.env
+.env.sample
