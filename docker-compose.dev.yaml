@@ -1,12 +1,19 @@
-version: "3"
+# Local test of the two-container layout: php-fpm owns the network namespace (like a pod), the Apache
+# container (shared image from the php8.2 repository) joins it and reaches php-fpm on 127.0.0.1:9000.
 services:
-  apache:
+  php-fpm:
     build:
       context: .
-    image: php8.4-propeller-wordpress
+    image: php8.4-propeller-wordpress-fpm
     env_file: ./.env.sample
     ports:
       - 8080:80
-    restart: always
     volumes:
-      - ./test/index.php:/var/www/html/index.php
+      - ./test/:/var/www/html/
+  apache:
+    image: ghcr.io/pjirlip/httpd:latest
+    network_mode: "service:php-fpm"
+    depends_on:
+      - php-fpm
+    volumes:
+      - ./test/:/var/www/html/:ro

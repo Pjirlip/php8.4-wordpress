@@ -1,32 +1,31 @@
-FROM php:8.4-apache
+# PHP-FPM container for WordPress sites: runs PHP only. Static files, .htaccess rules and keep-alive
+# connections are handled by the Apache container (ghcr.io/pjirlip/httpd, built from the php8.2
+# repository), which proxies .php requests to this container over 127.0.0.1:9000 inside the same pod.
+FROM php:8.4-fpm
 LABEL maintainer="Philipp Dippel <philipp.dippel@propeller.de>"
 SHELL ["/bin/bash", "-c"]
 
-RUN addgroup --gid 1000 propeller && useradd --system -u 1000 -g propeller propeller 
+RUN addgroup --gid 1000 propeller && useradd --system -u 1000 -g propeller propeller
 
 ENV PROVISION_CONTEXT="production"
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe/Berlin
-ENV APACHE_LOCK_DIR=/var/lock/apache2
-ENV APACHE_LOG_DIR=/var/log/apache2
-ENV APACHE_PID_FILE=/var/run/apache2/apache2.pid
-ENV APACHE_SERVER_NAME=localhost
-ENV APACHE_RUN_USER=propeller
-ENV APACHE_RUN_GROUP=propeller
-ENV APACHE_RUN_DIR=/var/run/apache2
 ENV DOCUMENT_ROOT=/var/www/html
 ENV LETSENCRYPT_EMAIL=certbot@propeller.de
-ENV PORT=80
-# Apache runtime tuning (K1, K2, H4). An empty APACHE_MAX_REQUEST_WORKERS lets entrypoint.sh derive the
-# value from the container memory limit: floor((limit_MiB - BASELINE_MB) / CHILD_MB)
-ENV APACHE_MAX_REQUEST_WORKERS="" \
-    APACHE_CHILD_MEMORY_MB=100 \
-    APACHE_BASELINE_MEMORY_MB=256 \
-    APACHE_MIN_SPARE_SERVERS=2 \
-    APACHE_MAX_SPARE_SERVERS=4 \
-    APACHE_MAX_CONNECTIONS_PER_CHILD=1000 \
-    APACHE_TIMEOUT=120 \
-    APACHE_ALLOW_OVERRIDE=All
+# Pool sizing (K1). An empty PHP_FPM_MAX_CHILDREN lets entrypoint.sh derive the value from the container
+# memory limit: floor((limit_MiB - BASELINE_MB) / CHILD_MB). Only PHP requests occupy a child.
+ENV PHP_FPM_LISTEN=127.0.0.1:9000 \
+    PHP_FPM_PM=dynamic \
+    PHP_FPM_MAX_CHILDREN="" \
+    PHP_FPM_CHILD_MEMORY_MB=64 \
+    PHP_FPM_BASELINE_MEMORY_MB=256 \
+    PHP_FPM_START_SERVERS=2 \
+    PHP_FPM_MIN_SPARE_SERVERS=1 \
+    PHP_FPM_MAX_SPARE_SERVERS=4 \
+    PHP_FPM_PROCESS_IDLE_TIMEOUT=10s \
+    PHP_FPM_MAX_REQUESTS=1000 \
+    PHP_FPM_REQUEST_TERMINATE_TIMEOUT=300 \
+    PHP_FPM_SLOWLOG_TIMEOUT=0
 
 ENV SMTP_SERVER=example.com
 ENV SMTP_PORT=25
@@ -44,13 +43,13 @@ ENV PHP_OPCACHE_MEMORY=192 \
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY ./config/php.ini /usr/local/etc/php/conf.d/zz-propeller.ini
-COPY ./config/000-default.conf /etc/apache2/sites-available/000-default.conf
-COPY ./config/apache2.conf /etc/apache2/apache2.conf
-COPY ./config/mpm_prefork.conf /etc/apache2/mods-available/mpm_prefork.conf
+COPY ./config/php-fpm.conf /usr/local/etc/php-fpm.conf
 COPY ./config/locale.gen /etc/locale.gen
-
-COPY ./scripts/*.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/*.sh
+COPY ./scripts/entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh && \
+    # the base image's pool files (www.conf, docker.conf, zz-docker.conf) are replaced by the pool
+    # entrypoint.sh writes at startup
+    rm -f /usr/local/etc/php-fpm.d/*.conf
 
 RUN mkdir -p /home/propeller/.composer/cache && chown -R propeller:propeller /home/propeller/ && chmod -R 0750 /home/propeller/
 
@@ -105,8 +104,6 @@ RUN apt-get update && \
         xsl \
         ldap \
     && docker-php-ext-enable redis imagick \
-    && a2enmod rewrite deflate headers mime expires filter setenvif env authz_core auth_basic alias \
-    && echo "export PATH=":$PATH"" \
     && apt-get clean \
     # keep the runtime libraries the compiled extensions link against (libzip, libxslt, ...);
     # --auto-remove would otherwise drop them together with the -dev packages
@@ -131,7 +128,7 @@ RUN apt-get update && \
         make \
         autoconf \
         pkg-config \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* 
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/src/*
 
 # Allow ImageMagick (and the imagick extension) to read PDF/PostScript via Ghostscript for PDF thumbnails.
 # Debian ships the policy under /etc/ImageMagick-6 (bookworm) or /etc/ImageMagick-7 (trixie); the coder
@@ -148,31 +145,27 @@ RUN chmod +x /bin/wp-cli
 # Add propeller Gitlab to known hosts for composer (non-fatal: hosts are unreachable from public CI runners)
 RUN (ssh-keyscan -T 5 -H gitlab.propeller.de atum.propeller.de >> /etc/ssh/ssh_known_hosts || true)
 
-# Generate and set Locale
-RUN locale-gen
+# Generate and set Locale; verified because locale-gen silently skips a last line without newline
+RUN locale-gen && locale -a | grep -qi "^en_US.utf8$"
 ENV LC_ALL=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 # Set Timezone
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Logs go straight to the container streams (see apache2.conf). The Debian default would log every
-# request a second time into other_vhosts_access.log (H5)
-RUN rm -f /etc/apache2/conf-enabled/other-vhosts-access-log.conf
-
-# Static health endpoint for Kubernetes probes (H3) and drop-in directory for per-site Apache rules (K2)
-RUN mkdir -p /opt/propeller/healthz /etc/apache2/site.d && echo ok > /opt/propeller/healthz/index.html
-
-RUN rm /usr/src/*
-
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
 
-# Validate the complete configuration at build time without starting a daemon (H6)
-RUN APACHE_MAX_REQUEST_WORKERS=8 apache2ctl -t
+# Validate pool generation and the complete FPM configuration at build time (H6); every compiled extension
+# has to load, a missing runtime library would otherwise only show up as a PHP startup warning
+RUN PHP_FPM_MAX_CHILDREN=4 entrypoint.sh php-fpm -t && \
+    for ext in gd imagick intl ldap redis soap xsl zip mysqli pdo_mysql; do php -m | grep -qix "$ext" || { echo "extension $ext failed to load"; exit 1; }; done && \
+    php --ini | grep -q zz-propeller.ini && \
+    wp-cli --version --allow-root
 
-# Every compiled extension has to load; a missing runtime library would otherwise only show up as a PHP startup warning
-RUN for ext in gd imagick intl ldap redis soap xsl zip; do php -m | grep -qix "$ext" || { echo "extension $ext failed to load"; exit 1; }; done
+EXPOSE 9000
 
-EXPOSE $PORT
+# SIGQUIT is php-fpm's graceful stop; Kubernetes sends it on pod termination (bounded by process_control_timeout)
+STOPSIGNAL SIGQUIT
 
 ENTRYPOINT ["entrypoint.sh"]
+CMD ["php-fpm"]

@@ -25,7 +25,7 @@ spec:
             runAsGroup: 1000
           containers:
             - name: wp-cron
-              image: ghcr.io/pjirlip/php8.4-wordpress:latest
+              image: ghcr.io/pjirlip/php8.4-wordpress-fpm:latest
               command: ["wp-cli", "cron", "event", "run", "--due-now", "--quiet", "--path=/var/www/html"]
               envFrom:
                 - secretRef:

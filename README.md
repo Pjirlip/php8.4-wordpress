@@ -1,5 +1,11 @@
 # php-8-4-wordpress
 
+> **Branch `fpm`:** dieses Repository baut hier das PHP-FPM-Image `ghcr.io/pjirlip/php8.4-wordpress-fpm`
+> (`Dockerfile`). Der Apache-Container ist für alle Sites derselbe, `ghcr.io/pjirlip/httpd` aus dem Repository
+> `php8.2` (event-MPM + mod_proxy_fcgi, ohne PHP). Aufbau, Pool-Dimensionierung, Probes und Deployment-Skelett
+> sind im README von `php8.2` (Abschnitt "Apache + PHP-FPM") beschrieben. `php8.4-wordpress:latest` bleibt bis
+> zum Merge unverändert.
+
 Dockerimage für Hosting von WordPress-Seiten mit PHP Version 8.4
 
 Inkl. GM, ImageMagick, wp-cli und Redis Support
