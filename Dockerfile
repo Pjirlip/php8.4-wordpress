@@ -15,6 +15,7 @@ ENV LETSENCRYPT_EMAIL=certbot@propeller.de
 # Pool sizing (K1). An empty PHP_FPM_MAX_CHILDREN lets entrypoint.sh derive the value from the container
 # memory limit: floor((limit_MiB - BASELINE_MB) / CHILD_MB). Only PHP requests occupy a child.
 ENV PHP_FPM_LISTEN=127.0.0.1:9000 \
+    PHP_FPM_ALLOWED_CLIENTS=127.0.0.1 \
     PHP_FPM_PM=dynamic \
     PHP_FPM_MAX_CHILDREN="" \
     PHP_FPM_CHILD_MEMORY_MB=64 \
