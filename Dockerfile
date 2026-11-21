@@ -5,6 +5,13 @@ FROM php:8.4-fpm
 LABEL maintainer="Philipp Dippel <philipp.dippel@propeller.de>"
 SHELL ["/bin/bash", "-c"]
 
+# Build-time guard: the base image has to carry the PHP security release of 19 Nov 2026 (CVE-2026-129289 in
+# php-fpm, CVE-2026-115560 and others). Raise PHP_MIN_VERSION with every security release; the commit rebuilds
+# the image and the build fails as long as the registry still serves an older base image.
+ARG PHP_MIN_VERSION=8.4.28
+RUN { dpkg --compare-versions "$PHP_VERSION" ge "$PHP_MIN_VERSION" || { echo "PHP $PHP_VERSION is older than $PHP_MIN_VERSION"; exit 1; }; } && \
+    echo "PHP $PHP_VERSION"
+
 RUN addgroup --gid 1000 propeller && useradd --system -u 1000 -g propeller propeller
 
 ENV PROVISION_CONTEXT="production"
